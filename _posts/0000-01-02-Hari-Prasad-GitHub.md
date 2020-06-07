@@ -2,7 +2,7 @@
 
 layout: slide
 
-title: "welcome to our second slide!"
+title: "learn to commit changes to file"
 
 ---
 
