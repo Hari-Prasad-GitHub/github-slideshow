@@ -1,0 +1,182 @@
+
+//-------------------------------------------------
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "DHTesp.h"
+#include <Stepper.h>
+
+const int DHT_PIN=15;
+const int stepsPerRevolution = 500;
+Stepper myStepper(stepsPerRevolution, 33, 25, 26, 27);
+DHTesp dhtsensor;
+#define temp_pin 15
+
+void callback(char* subscribetopic,byte* payload, unsigned int payloadLength);
+#define ORG "lfq5we"
+#define DEVICE_TYPE "Firealarm"
+#define DEVICE_ID "513119106025"
+#define TOKEN "12345678"
+String data3;
+
+char server[]= ORG ".messaging.internetofthings.ibmcloud.com";
+char publishTopic[]="iot-2/evt/Data/fmt/json";
+char subscribeTopic[]="iot-2/cmd/test/fmt/String";
+char authMethod[]="use-token-auth";
+char token[]=TOKEN;
+char clientID[]="d:"ORG":"DEVICE_TYPE":"DEVICE_ID;
+
+WiFiClient wifiClient;
+PubSubClient client(server,1883,callback,wifiClient);
+
+
+
+
+ // should match the Beta Coefficient of the thermistor
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(14,OUTPUT);
+  pinMode(2, OUTPUT);
+  dhtsensor.setup(DHT_PIN,DHTesp::DHT22);
+  myStepper.setSpeed(400);
+  
+  wificonnect();
+  mqttconnect();
+
+}
+void loop() {
+  
+  TempAndHumidity data=dhtsensor.getTempAndHumidity();
+  float temp=data.temperature;
+  float humid=data.humidity;
+  Serial.print("Temperature: ");
+  Serial.print(temp);
+  Serial.println(" ℃");
+  Serial.print("Humidity: ");
+  Serial.print(humid);
+  Serial.println(" %");
+  if(temp>=45 && humid<33){
+    PublishData2(temp);
+    PublishData1(temp,humid);
+    myStepper.step(stepsPerRevolution);
+    digitalWrite(14, HIGH); 
+    tone(2,3000,1000);
+    Serial.println("Fire detected: Water shower ON");
+  }
+  else if(temp>=45 && humid<66){
+    PublishData2(temp);
+    PublishData1(temp,humid);
+    tone(2,3000,1000);
+    digitalWrite(14,HIGH);
+  }
+  
+  else{
+    digitalWrite(14, LOW);
+    PublishData1(temp,humid);
+}
+  if(!client.loop()){
+    mqttconnect();
+  }
+  delay(1000);
+}
+void PublishData1(float tem, float humid){
+  mqttconnect();
+  String payload= "{\"temp\":";
+  payload += tem;
+  payload+=",";
+  payload+="\"humid\":";
+  payload+= humid;
+  payload+="}";
+
+  Serial.print("Sending payload:");
+  Serial.println(payload);
+
+  if(client.publish(publishTopic,(char*)payload.c_str())){
+    Serial.println("publish ok");
+  } else{
+    Serial.println("publish failed");
+  }
+}
+void PublishData2(float tem){
+  mqttconnect();
+  String payload= "{\"alert\":";
+  payload += tem;
+  payload+="}";
+
+  Serial.print("Sending payload:");
+  Serial.println(payload);
+
+  if(client.publish(publishTopic,(char*)payload.c_str())){
+    Serial.println("publish ok");
+  } else{
+    Serial.println("publish failed");
+  }
+}
+/*void PublishData3(float humid){
+  mqttconnect();
+  String payload= "{\"humid\":";
+  payload += humid;
+  payload+="}";
+
+  Serial.print("Sending payload:");
+  Serial.println(payload);
+
+  if(client.publish(publishTopic,(char*)payload.c_str())){
+    Serial.println("publish ok");
+  } else{
+    Serial.println("publish failed");
+  }
+}*/
+void mqttconnect(){
+  if(!client.connected()){
+    Serial.print("Reconnecting to");
+    Serial.println(server);
+    while(!!!client.connect(clientID, authMethod, token)){
+      Serial.print(".");
+      delay(500);
+    }
+    initManagedDevice();
+    Serial.println();
+  }
+}
+
+void wificonnect(){
+  Serial.println();
+  Serial.print("Connecting to");
+
+  WiFi.begin("Wokwi-GUEST","",6);
+  while(WiFi.status()!=WL_CONNECTED){
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WIFI CONNECTED");
+  Serial.println("IP address:");
+  Serial.println(WiFi.localIP());
+}
+
+void initManagedDevice(){
+  if(client.subscribe(subscribeTopic)){
+    Serial.println((subscribeTopic));
+    Serial.println("subscribe to cmd ok");
+  }else{
+    Serial.println("subscribe to cmd failed");
+  }
+}
+
+void callback(char* subscribeTopic, byte* payload, unsigned int payloadLength){
+  Serial.print("callback invoked for topic:");
+  Serial.println(subscribeTopic);
+  for(int i=0; i<payloadLength; i++){
+    data3 += (char)payload[i];
+  }
+  Serial.println("data:"+ data3);
+  if(data3=="lighton"){
+    Serial.println(data3);
+    digitalWrite(14,HIGH);
+  }else{
+    Serial.println(data3);
+    digitalWrite(14,LOW);
+  }
+  data3="";
+}
